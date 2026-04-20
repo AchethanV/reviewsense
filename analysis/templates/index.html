@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ReviewSense AI</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI';
+            background: #0f172a;
+            color: white;
+        }
+
+        header {
+            padding: 15px;
+            background: #1e293b;
+            text-align: center;
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .top-controls {
+            margin-top: 10px;
+        }
+
+        select, button {
+            padding: 6px;
+            margin: 5px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            gap: 15px;
+            padding: 15px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        svg {
+            background: #020617;
+            border-radius: 10px;
+        }
+
+        .positive { color: #22c55e; }
+        .negative { color: #ef4444; }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <button onclick="toggleProductForm()">➕ Add Product</button>
+    📊 ReviewSense AI Dashboard
+
+    <div class="top-controls">
+
+        <!-- ✅ PRODUCTS FROM DB -->
+        <select id="productSelect" onchange="changeProduct()"></select>
+
+        <!-- ADMIN -->
+        <a href="/admin/" target="_blank">
+            <button>🔐 Admin Panel</button>
+        </a>
+
+        <!-- 🔥 ADD REVIEW → REDIRECT TO ADMIN -->
+        <button onclick="goToAdminReview()">➕ Add Review (Admin)</button>
+
+    </div>
+</header>
+
+<div class="container">
+
+    <div class="card">
+        <h3>Summary</h3>
+        <p id="total"></p>
+        <p id="positive" class="positive"></p>
+        <p id="negative" class="negative"></p>
+        <p id="topIssue"></p>
+    </div>
+
+    <div class="card">
+        <h3>Product Insights Graph</h3>
+        <svg width="600" height="400"></svg>
+    </div>
+
+    <div class="card">
+        <h3>Aspect Reviews</h3>
+        <div id="reviews">Click an aspect</div>
+    </div>
+
+</div>
+<div id="productForm" style="display:none; padding:15px;">
+    <div class="card">
+        <h3>Add Product</h3>
+
+        <input id="productName" placeholder="Product Name"
+            style="width:100%; margin-bottom:10px;" />
+
+        <input id="productBrand" placeholder="Brand"
+            style="width:100%; margin-bottom:10px;" />
+
+        <button onclick="submitProduct()">Add Product</button>
+
+        <p id="productStatus"></p>
+    </div>
+</div>
+
+<script>
+
+let PRODUCT_ID = null;
+
+// 🔥 LOAD PRODUCTS FROM DB
+function loadProducts() {
+    fetch("/api/products/")
+    .then(res => res.json())
+    .then(data => {
+
+        let select = document.getElementById("productSelect");
+        select.innerHTML = "";
+
+        data.forEach(p => {
+            let option = document.createElement("option");
+            option.value = p.id;
+            option.text = p.name;
+            select.appendChild(option);
+        });
+
+        if (!PRODUCT_ID) {
+            PRODUCT_ID = data[0]?.id;
+        }
+
+        select.value = PRODUCT_ID;
+
+        loadAll();
+    });
+}
+
+// CHANGE PRODUCT
+function changeProduct() {
+    PRODUCT_ID = document.getElementById("productSelect").value;
+    loadAll();
+}
+
+// 🔥 REDIRECT TO ADMIN REVIEW PAGE
+function goToAdminReview() {
+    window.open("/admin/analysis/review/add/", "_blank");
+}
+
+// LOAD GRAPH + STATS
+function loadAll() {
+
+    fetch(`/api/graph/${PRODUCT_ID}/`)
+    .then(res => res.json())
+    .then(data => {
+
+        const svg = d3.select("svg");
+        svg.selectAll("*").remove();
+
+        const simulation = d3.forceSimulation(data.nodes)
+            .force("link", d3.forceLink(data.edges).id(d => d.id).distance(120))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(300, 200));
+
+        const link = svg.selectAll("line")
+            .data(data.edges)
+            .enter()
+            .append("line")
+            .style("stroke", d => d.weight > 0 ? "#22c55e" : "#ef4444")
+            .style("stroke-width", 2);
+
+        const node = svg.selectAll("circle")
+            .data(data.nodes)
+            .enter()
+            .append("circle")
+            .attr("r", d => d.type === "product" ? 20 : 14)
+            .style("fill", d => d.type === "product" ? "#f59e0b" : "#38bdf8")
+            .on("click", (e, d) => {
+
+                if (d.type === "product") return;
+
+                fetch(`/api/reviews/${PRODUCT_ID}/${d.id}/`)
+                .then(res => res.json())
+                .then(data => {
+
+                    let html = `<h4>${d.id}</h4>`;
+                    data.forEach(r => {
+                        html += `<p class="${r.score > 0 ? 'positive':'negative'}">
+                        ${r.text}</p>`;
+                    });
+
+                    document.getElementById("reviews").innerHTML = html;
+                });
+            });
+
+        const text = svg.selectAll("text")
+            .data(data.nodes)
+            .enter()
+            .append("text")
+            .text(d => d.id)
+            .attr("fill", "white");
+
+        simulation.on("tick", () => {
+            link.attr("x1", d=>d.source.x)
+                .attr("y1", d=>d.source.y)
+                .attr("x2", d=>d.target.x)
+                .attr("y2", d=>d.target.y);
+
+            node.attr("cx", d=>d.x).attr("cy", d=>d.y);
+            text.attr("x", d=>d.x+10).attr("y", d=>d.y);
+        });
+    });
+
+    fetch(`/api/stats/${PRODUCT_ID}/`)
+    .then(res => res.json())
+    .then(data => {
+
+        document.getElementById("total").innerHTML =
+            `⭐ Total: ${data.total}`;
+
+        document.getElementById("positive").innerHTML =
+            `😊 Positive: ${data.positive}`;
+
+        document.getElementById("negative").innerHTML =
+            `😡 Negative: ${data.negative}`;
+
+        let worst = Object.entries(data.aspects)
+            .sort((a,b)=>a[1]-b[1])[0];
+
+        document.getElementById("topIssue").innerHTML =
+            worst ? `🔥 Issue: ${worst[0]}` : "";
+    });
+}
+
+// INITIAL LOAD
+loadProducts();
+function toggleProductForm() {
+    let f = document.getElementById("productForm");
+    f.style.display = f.style.display === "none" ? "block" : "none";
+}
+
+function submitProduct() {
+    let name = document.getElementById("productName").value;
+    let brand = document.getElementById("productBrand").value;
+
+    fetch("/api/add-product/", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            name: name,
+            brand: brand
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        alert("Product Added!");
+        loadProducts();
+    });
+
+}
+
+</script>
+
+</body>
+</html>
