@@ -1,6 +1,8 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.shortcuts import render, get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+
 from .models import Product, Review, Aspect, Sentiment
 
 
@@ -9,21 +11,27 @@ def home(request):
     return render(request, 'index.html')
 
 
-# ADD PRODUCT ✅
+# ✅ ADD PRODUCT
+@csrf_exempt
 @api_view(['POST'])
 def add_product(request):
     name = request.data.get('name')
-    brand = request.data.get('brand')
 
     if not name:
-        return Response({"error": "Name required"})
+        return Response({"error": "Name required"}, status=400)
 
-    product = Product.objects.create(name=name, brand=brand)
+    product = Product.objects.create(name=name)
 
-    return Response({"message": "Product added"})
+    print("SAVED:", product.id, product.name)
+
+    return Response({
+        "message": "Product added",
+        "id": product.id,
+        "name": product.name
+    })
 
 
-# GET PRODUCTS ✅
+# ✅ GET PRODUCTS
 @api_view(['GET'])
 def get_products(request):
     products = Product.objects.all()
@@ -33,28 +41,49 @@ def get_products(request):
     ])
 
 
-# ADD REVIEW + SIMPLE SENTIMENT ✅
+# ✅ ADD REVIEW (ASPECT + RATING)
+@csrf_exempt
 @api_view(['POST'])
 def analyze_review(request):
+    print("DATA:", request.data)
+
     text = request.data.get('text')
     product_id = request.data.get('product')
+    aspect_name = request.data.get('aspect', 'general')
+    rating = int(request.data.get('rating', 3))
+
+    if not text or not product_id:
+        return Response({"error": "Missing data"}, status=400)
 
     product = get_object_or_404(Product, id=product_id)
 
-    review = Review.objects.create(product=product, text=text)
+    # Save review
+    review = Review.objects.create(
+        product=product,
+        text=text,
+        rating=rating
+    )
 
-    score = 1 if "good" in text.lower() else -1
+    # Sentiment
+    score = 1 if rating >= 3 else -1
 
+    # ✅ FIXED: avoid MultipleObjectsReturned
+    aspect = Aspect.objects.filter(name=aspect_name).first()
+
+    if not aspect:
+        aspect = Aspect.objects.create(name=aspect_name)
+
+    # Save sentiment
     Sentiment.objects.create(
         review=review,
-        aspect=Aspect.objects.get_or_create(name="general")[0],
+        aspect=aspect,
         score=score
     )
 
+    print("REVIEW SAVED:", review.text)
+
     return Response({"message": "Review added"})
-
-
-# GRAPH (WORKING VERSION) ✅
+# ✅ GRAPH
 @api_view(['GET'])
 def get_graph(request, product_id):
     sentiments = Sentiment.objects.filter(review__product_id=product_id)
@@ -84,7 +113,7 @@ def get_graph(request, product_id):
     })
 
 
-# STATS
+# ✅ STATS
 @api_view(['GET'])
 def get_stats(request, product_id):
     sentiments = Sentiment.objects.filter(review__product_id=product_id)
@@ -96,12 +125,19 @@ def get_stats(request, product_id):
     })
 
 
-# REVIEWS
+# ✅ REVIEWS BY ASPECT
 @api_view(['GET'])
 def get_reviews_by_aspect(request, product_id, aspect_name):
-    sentiments = Sentiment.objects.filter(review__product_id=product_id)
+    sentiments = Sentiment.objects.filter(
+        review__product_id=product_id,
+        aspect__name=aspect_name
+    )
 
     return Response([
-        {"text": s.review.text, "score": s.score}
+        {
+            "text": s.review.text,
+            "score": s.score,
+            "rating": s.review.rating   # ⭐ NEW
+        }
         for s in sentiments
     ])

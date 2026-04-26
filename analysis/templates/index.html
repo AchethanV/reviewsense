@@ -53,6 +53,7 @@
 </head>
 
 <body>
+    <input type="hidden" id="csrfToken" value="{{ csrf_token }}">
 
 <header>
     <button onclick="toggleProductForm()">➕ Add Product</button>
@@ -110,14 +111,101 @@
         <p id="productStatus"></p>
     </div>
 </div>
+<div class="card">
+    <h3>➕ Add Review</h3>
+
+    <!-- Aspect Selection -->
+    <select id="aspectSelect" style="width:100%; padding:5px;">
+        <option value="battery">Battery</option>
+        <option value="camera">Camera</option>
+        <option value="screen">Screen</option>
+        <option value="performance">Performance</option>
+        <option value="design">Design</option>
+    </select>
+
+    <br><br>
+
+    <!-- ⭐ Rating -->
+    <select id="ratingSelect" style="width:100%; padding:5px;">
+        <option value="5">⭐⭐⭐⭐⭐ (5)</option>
+        <option value="4">⭐⭐⭐⭐ (4)</option>
+        <option value="3">⭐⭐⭐ (3)</option>
+        <option value="2">⭐⭐ (2)</option>
+        <option value="1">⭐ (1)</option>
+    </select>
+
+    <br><br>
+
+    <!-- Review Text -->
+    <textarea id="reviewText" placeholder="Enter review..." style="width:100%; height:80px;"></textarea>
+
+    <br><br>
+
+    <button onclick="submitReview()">Add Review</button>
+</div>
 
 <script>
+   function submitReview() {
+    let text = document.getElementById("reviewText").value;
+    let aspect = document.getElementById("aspectSelect").value;
+    let rating = document.getElementById("ratingSelect").value;
 
-let PRODUCT_ID = null;
+    if (!text) {
+        alert("Enter review");
+        return;
+    }
 
-// 🔥 LOAD PRODUCTS FROM DB
+    fetch("http://127.0.0.1:8000/api/analyze/", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            product: PRODUCT_ID,
+            text: text,
+            aspect: aspect,
+            rating: rating   // ⭐ NEW
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        alert("Review Added ✅");
+        document.getElementById("reviewText").value = "";
+        loadAll(); // refresh graph
+    })
+    .catch(err => console.error(err));
+}
+function loadReviews() {
+    fetch(`http://127.0.0.1:8000/api/reviews/${PRODUCT_ID}/`)
+    .then(res => res.json())
+    .then(data => {
+
+        // Average Rating
+        document.getElementById("avgRating").innerText =
+            data.average_rating + " ⭐";
+
+        // Review List
+        let list = document.getElementById("reviewList");
+        list.innerHTML = "";
+
+        data.reviews.forEach(r => {
+            let div = document.createElement("div");
+            div.style.borderBottom = "1px solid #ccc";
+            div.style.padding = "5px";
+
+            div.innerHTML = `
+                <b>${"⭐".repeat(r.rating)}</b><br>
+                ${r.text}
+            `;
+
+            list.appendChild(div);
+        });
+    });
+}
 function loadProducts() {
-    fetch("/api/products/")
+    fetch("http://127.0.0.1:8000/api/products/", {
+    cache: "no-store"
+})
     .then(res => res.json())
     .then(data => {
 
@@ -138,6 +226,10 @@ function loadProducts() {
         select.value = PRODUCT_ID;
 
         loadAll();
+        if (data.length === 0) {
+    alert("No products found!");
+    return;
+}
     });
 }
 
@@ -158,6 +250,7 @@ function loadAll() {
     fetch(`/api/graph/${PRODUCT_ID}/`)
     .then(res => res.json())
     .then(data => {
+          loadReviews(); 
 
         const svg = d3.select("svg");
         svg.selectAll("*").remove();
@@ -244,25 +337,30 @@ function toggleProductForm() {
     f.style.display = f.style.display === "none" ? "block" : "none";
 }
 
+function getCSRFToken() {
+    return document.getElementById("csrfToken").value;
+}
+
 function submitProduct() {
     let name = document.getElementById("productName").value;
-    let brand = document.getElementById("productBrand").value;
 
-    fetch("/api/add-product/", {
+    fetch("http://127.0.0.1:8000/api/add-product/", {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCSRFToken()   // 🔥 FIX
         },
         body: JSON.stringify({
-            name: name,
-            brand: brand
+            name: name
         })
     })
     .then(res => res.json())
     .then(data => {
-        alert("Product Added!");
+        console.log(data);
+        alert("Product Added ✅");
         loadProducts();
-    });
+    })
+    .catch(err => console.error(err));
 
 }
 
